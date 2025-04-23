@@ -42,6 +42,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   initialized: boolean;
+  forceSessionRefresh: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -530,6 +531,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const forceSessionRefresh = async () => {
+    try {
+      // Skip if navigation is in progress
+      if (NAVIGATION_IN_PROGRESS) {
+        console.log('Skipping force session refresh during navigation');
+        return true;
+      }
+      
+      // Just extend token validity - no need to check with server
+      extendTokenValidity();
+      
+      // Set session valid flag
+      GLOBAL_SESSION_VALID = true;
+      
+      // Try to get user from localStorage if not already available
+      if (!user) {
+        try {
+          const cachedUser = localStorage.getItem(USER_CACHE_KEY);
+          if (cachedUser) {
+            const parsedUser = JSON.parse(cachedUser);
+            setUser(parsedUser);
+          }
+        } catch (error) {
+          console.error('Error loading cached user during force refresh:', error);
+        }
+      }
+      
+      // Mark as initialized
+      setInitialized(true);
+      
+      return true;
+    } catch (error) {
+      console.error('Error forcing session refresh:', error);
+      return false;
+    }
+  };
+
   const value = {
     user,
     session,
@@ -538,6 +576,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signOut,
     initialized,
+    forceSessionRefresh,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

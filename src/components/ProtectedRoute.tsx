@@ -45,7 +45,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
 
   useEffect(() => {
     // If we already have a user and they have the correct role, don't do anything
-    if (user && allowedRoles.includes(user.role)) {
+    if (user && user.role && allowedRoles.includes(user.role)) {
       return;
     }
 
@@ -101,19 +101,21 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
       }
       
       // If user exists but doesn't have required role, redirect to appropriate page
-      if (!isLoading && user && !allowedRoles.includes(user.role)) {
+      if (!isLoading && user && (!user.role || !allowedRoles.includes(user.role))) {
         redirectInProgress.current = true;
         
         // Redirect based on role
         let redirectPath = '/';
-        switch(user.role) {
-          case 'admin':
-          case 'manager':
-            redirectPath = '/dashboard';
-            break;
-          case 'user':
-            redirectPath = '/user-dashboard';
-            break;
+        if (user.role) {
+          switch(user.role) {
+            case 'admin':
+            case 'manager':
+              redirectPath = '/dashboard';
+              break;
+            case 'user':
+              redirectPath = '/user-dashboard';
+              break;
+          }
         }
         
         router.replace(redirectPath).then(() => {
@@ -160,7 +162,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
   }
 
   // If not logged in or not authorized, and not bypassing, don't render children
-  if ((!user || !allowedRoles.includes(user.role)) && !bypassProtection) {
+  if ((!user || !user.role || !allowedRoles.includes(user.role)) && !bypassProtection) {
     return <LoadingSpinner message="Redirecting..." />;
   }
   
