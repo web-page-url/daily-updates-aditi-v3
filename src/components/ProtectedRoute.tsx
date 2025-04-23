@@ -1,15 +1,15 @@
 import { ReactNode, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
-import { useAuth } from '../lib/authContext';
+import { useAuth, UserRole } from '../lib/authContext';
 import LoadingSpinner from './LoadingSpinner';
 
 interface ProtectedRouteProps {
   children: ReactNode;
-  allowedRoles?: string[];
+  allowedRoles?: UserRole[];
 }
 
 export default function ProtectedRoute({ children, allowedRoles = ['user', 'manager', 'admin'] }: ProtectedRouteProps) {
-  const { user, loading, forceSessionRefresh } = useAuth();
+  const { user, isLoading, forceSessionRefresh } = useAuth();
   const router = useRouter();
   const [timeoutReached, setTimeoutReached] = useState(false);
   const [bypassProtection, setBypassProtection] = useState(false);
@@ -45,7 +45,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
 
   useEffect(() => {
     // If we already have a user and they have the correct role, don't do anything
-    if (user && allowedRoles.includes(user.role as string)) {
+    if (user && allowedRoles.includes(user.role)) {
       return;
     }
 
@@ -53,7 +53,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
     const safetyTimeout = setTimeout(() => {
       if (!mountedRef.current) return;
       
-      if (loading) {
+      if (isLoading) {
         console.log('Protected route timeout reached, showing fallback UI');
         setTimeoutReached(true);
         
@@ -68,14 +68,15 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
           // For other routes, try to refresh the session token first before giving up
           console.log(`Attempting to refresh session (attempt ${retryCount + 1})`);
           
-          forceSessionRefresh().then(() => {
-            if (mountedRef.current) {
+          forceSessionRefresh().then(success => {
+            if (success) {
+              console.log('Session refreshed successfully');
               // Reset timeout flag since we refreshed
-              setTimeoutReached(false);
-              setRetryCount(prev => prev + 1);
-            }
-          }).catch(() => {
-            if (mountedRef.current) {
+              if (mountedRef.current) {
+                setTimeoutReached(false);
+                setRetryCount(prev => prev + 1);
+              }
+            } else if (mountedRef.current) {
               // If refresh failed and we're still mounted, increment retry count
               setRetryCount(prev => prev + 1);
             }
@@ -90,7 +91,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
       if (redirectInProgress.current || !mountedRef.current) return;
 
       // If authentication is done loading and there's no user, redirect to login
-      if (!loading && !user) {
+      if (!isLoading && !user) {
         redirectInProgress.current = true;
         router.replace('/').then(() => {
           if (mountedRef.current) {
@@ -100,7 +101,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
       }
       
       // If user exists but doesn't have required role, redirect to appropriate page
-      if (!loading && user && !allowedRoles.includes(user.role as string)) {
+      if (!isLoading && user && !allowedRoles.includes(user.role)) {
         redirectInProgress.current = true;
         
         // Redirect based on role
@@ -131,7 +132,7 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
     return () => {
       clearTimeout(safetyTimeout);
     };
-  }, [loading, user, router, allowedRoles, visibilityState, retryCount, forceSessionRefresh]);
+  }, [isLoading, user, router, allowedRoles, visibilityState, retryCount, forceSessionRefresh]);
 
   // If we've been loading too long and it's not an admin/manager route, redirect to login
   if (timeoutReached && !bypassProtection && retryCount >= 2) {
@@ -147,19 +148,19 @@ export default function ProtectedRoute({ children, allowedRoles = ['user', 'mana
   }
 
   // If loading but we're bypassing protection for admin/manager routes, show the children
-  if (loading && bypassProtection) {
+  if (isLoading && bypassProtection) {
     // If it's a dashboard route, allow rendering children anyway despite loading state
     console.log('Bypassing loading state for admin/manager route');
     return <>{children}</>;
   }
 
   // Still loading and not yet timed out, show spinner
-  if (loading && !timeoutReached) {
+  if (isLoading && !timeoutReached) {
     return <LoadingSpinner message="Checking permissions..." />;
   }
 
   // If not logged in or not authorized, and not bypassing, don't render children
-  if ((!user || !allowedRoles.includes(user.role as string)) && !bypassProtection) {
+  if ((!user || !allowedRoles.includes(user.role)) && !bypassProtection) {
     return <LoadingSpinner message="Redirecting..." />;
   }
   

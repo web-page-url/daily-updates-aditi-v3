@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
-import { supabase, DailyUpdate, EnhancedUser } from '../lib/supabaseClient';
+import { supabase, DailyUpdate } from '../lib/supabaseClient';
 import { useAuth } from '../lib/authContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
 
 export default function UserDashboard() {
-  const { user, signOut, forceSessionRefresh, loading } = useAuth();
-  // Cast user to EnhancedUser to access additional properties
-  const enhancedUser = user as unknown as EnhancedUser | null;
-  
+  const { user, signOut, forceSessionRefresh } = useAuth();
   const router = useRouter();
   const [userUpdates, setUserUpdates] = useState<DailyUpdate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,7 +79,12 @@ export default function UserDashboard() {
           console.error('Session token issue detected (406 error). Attempting to refresh session...');
           
           // Use the new force session refresh method
-          await forceSessionRefresh();
+          const refreshSuccess = await forceSessionRefresh();
+          
+          if (!refreshSuccess) {
+            console.error('Failed to refresh session after 406 error');
+            throw new Error('Session refresh failed');
+          }
           
           // Only retry the fetch if the component is still mounted
           if (!mountedRef.current) return;
@@ -209,7 +211,7 @@ export default function UserDashboard() {
             <div>
               <h1 className="text-xl font-semibold text-white">Your Daily Updates</h1>
               <p className="text-sm text-gray-300">
-                {enhancedUser?.name || user?.email?.split('@')[0] || 'User'} ({user?.email})
+                {user?.name} ({user?.email})
               </p>
             </div>
             <div className="flex space-x-3">

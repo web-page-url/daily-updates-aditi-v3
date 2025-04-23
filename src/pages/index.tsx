@@ -3,29 +3,24 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import AuthOTP from '../components/AuthOTP';
 import { useAuth } from '../lib/authContext';
-import { EnhancedUser } from '../lib/supabaseClient';
 
 export default function Home() {
-  const { user, loading } = useAuth();
-  // Cast user to EnhancedUser to access role property safely
-  const enhancedUser = user as unknown as EnhancedUser | null;
-  
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const [showFallbackUI, setShowFallbackUI] = useState(false);
 
   useEffect(() => {
     // Force UI to show auth screen if loading takes too long (3 seconds)
     const loadingTimeout = setTimeout(() => {
-      if (loading) {
+      if (isLoading) {
         console.log('Loading timeout reached, showing fallback UI');
         setShowFallbackUI(true);
       }
     }, 3000);
 
     // If user is already authenticated, redirect based on role
-    if (user && !loading) {
-      const userRole = enhancedUser?.role || 'user';
-      switch (userRole) {
+    if (user && !isLoading) {
+      switch (user.role) {
         case 'admin':
         case 'manager':
           router.push('/dashboard');
@@ -37,10 +32,10 @@ export default function Home() {
     }
 
     return () => clearTimeout(loadingTimeout);
-  }, [user, loading, router, enhancedUser]);
+  }, [user, isLoading, router]);
 
   // Show a brief loading spinner, but only for a short time
-  if (loading && !showFallbackUI) {
+  if (isLoading && !showFallbackUI) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#1a1f2e]">
         <div className="text-center">

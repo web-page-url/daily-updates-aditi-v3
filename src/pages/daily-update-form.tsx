@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
-import { supabase, DailyUpdate, Team, EnhancedUser } from '../lib/supabaseClient';
+import { supabase, DailyUpdate, Team } from '../lib/supabaseClient';
 import { useAuth } from '../lib/authContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
 import debounce from 'lodash/debounce';
-import Script from 'next/script';
 
 // Constants for localStorage keys
 const FORM_DATA_STORAGE_KEY = 'aditi_daily_update_form_data';
@@ -14,7 +13,6 @@ const BLOCKERS_STORAGE_KEY = 'aditi_daily_update_blockers';
 const SELECTED_TEAM_STORAGE_KEY = 'aditi_daily_update_selected_team';
 const CURRENT_BLOCKER_STORAGE_KEY = 'aditi_daily_update_current_blocker';
 const TAB_STATE_PERSISTENCE_KEY = 'aditi_daily_update_tab_state';
-const FORM_LOADED_KEY = 'aditi_form_loaded_time';
 
 interface Blocker {
   id: string;
@@ -26,9 +24,6 @@ interface Blocker {
 export default function DailyUpdateFormPage() {
   const router = useRouter();
   const { user } = useAuth();
-  // Cast user to EnhancedUser to access additional properties
-  const enhancedUser = user as unknown as EnhancedUser | null;
-  
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -53,12 +48,10 @@ export default function DailyUpdateFormPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   
-  // Refs to track tab visibility state and prevent refresh
+  // Refs to track tab visibility state
   const wasHidden = useRef(false);
   const tabFocusCount = useRef(0);
   const initialLoadComplete = useRef(false);
-  const formStateInitialized = useRef(false);
-  const mountTime = useRef(Date.now());
 
   // Debounced save function to prevent excessive localStorage writes
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,7 +122,7 @@ export default function DailyUpdateFormPage() {
             // If user is different, use user info but not saved form data
             setFormData(prev => ({
               ...prev,
-              employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
+              employee_name: user.name || '',
               email_address: user.email || '',
             }));
           }
@@ -137,7 +130,7 @@ export default function DailyUpdateFormPage() {
           // If no saved data, use user info
           setFormData(prev => ({
             ...prev,
-            employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
+            employee_name: user.name || '',
             email_address: user.email || '',
           }));
         }
@@ -148,8 +141,8 @@ export default function DailyUpdateFormPage() {
           if (parsedFormData.email_address === user.email) {
             setSelectedTeam(savedSelectedTeam);
           }
-        } else if (enhancedUser?.teamId) {
-          setSelectedTeam(enhancedUser.teamId);
+        } else if (user.teamId) {
+          setSelectedTeam(user.teamId);
         }
         
         // Set blockers if saved
@@ -172,12 +165,12 @@ export default function DailyUpdateFormPage() {
         // Fallback to default user data
         setFormData(prev => ({
           ...prev,
-          employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
+          employee_name: user.name || '',
           email_address: user.email || '',
         }));
         
-        if (enhancedUser?.teamId) {
-          setSelectedTeam(enhancedUser.teamId);
+        if (user.teamId) {
+          setSelectedTeam(user.teamId);
         }
       }
     }
@@ -495,7 +488,7 @@ export default function DailyUpdateFormPage() {
         setShowAnimation(false);
         // Clear form
         setFormData({
-          employee_name: enhancedUser?.name || user?.email?.split('@')[0] || '',
+          employee_name: user?.name || '',
           employee_id: formData.employee_id, // Keep the employee ID
           email_address: user?.email || '',
           tasks_completed: '',
@@ -553,109 +546,8 @@ export default function DailyUpdateFormPage() {
     }
   };
 
-  // Extreme protection against page refreshes
-  useEffect(() => {
-    // Store page load timestamp to detect refreshes
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(FORM_LOADED_KEY, Date.now().toString());
-      
-      // Direct intervention at the form level
-      if (!formStateInitialized.current) {
-        formStateInitialized.current = true;
-        
-        // Force window to keep form state when tab becomes visible again
-        const directPageStabilizer = (e: Event) => {
-          if (document.visibilityState === 'visible') {
-            // Cancel any pending navigation
-            if (window.stop) window.stop();
-            
-            // Mark global state
-            if (window.__ADITI_PREVENT_REFRESH !== undefined) {
-              window.__ADITI_PREVENT_REFRESH = true;
-            }
-            
-            // Force the tab to stabilize
-            e.preventDefault?.();
-            
-            // Force state from storage to be restored
-            const savedFormData = localStorage.getItem(FORM_DATA_STORAGE_KEY);
-            const savedBlockers = localStorage.getItem(BLOCKERS_STORAGE_KEY);
-            const savedSelectedTeam = localStorage.getItem(SELECTED_TEAM_STORAGE_KEY);
-            
-            if (savedFormData && !isSubmitting) {
-              try {
-                const parsedData = JSON.parse(savedFormData);
-                if (parsedData && parsedData.email_address === user?.email) {
-                  // Only update if the form isn't already showing this data
-                  if (JSON.stringify(parsedData) !== JSON.stringify(formData)) {
-                    setFormData(parsedData);
-                  }
-                  
-                  if (savedSelectedTeam) {
-                    setSelectedTeam(savedSelectedTeam);
-                  }
-                  
-                  if (savedBlockers) {
-                    try {
-                      const parsedBlockers = JSON.parse(savedBlockers);
-                      setBlockers(parsedBlockers);
-                    } catch (error) {
-                      console.error('Error parsing saved blockers:', error);
-                    }
-                  }
-                }
-              } catch (error) {
-                console.error('Error processing saved form data:', error);
-              }
-            }
-          }
-        };
-        
-        // Use capture phase to intercept before other handlers
-        document.addEventListener('visibilitychange', directPageStabilizer, true);
-        
-        return () => {
-          document.removeEventListener('visibilitychange', directPageStabilizer, true);
-        };
-      }
-    }
-  }, [isSubmitting, formData, user]);
-
   return (
     <ProtectedRoute allowedRoles={['user', 'manager', 'admin']}>
-      {/* Form-specific protection against refreshes */}
-      <Script id="form-refresh-protection" strategy="afterInteractive">
-        {`
-          // Form-specific refresh protection
-          (function() {
-            // Add a flag to detect if we're returning to this form
-            if (document.visibilityState === 'visible') {
-              const lastFormTime = sessionStorage.getItem('${FORM_LOADED_KEY}');
-              if (lastFormTime) {
-                // We're coming back to the form, not performing an initial load
-                console.log('Returning to form. Preventing refresh...');
-                
-                // Prevent refresh
-                if (window.stop) window.stop();
-                
-                // Restore saved form data
-                try {
-                  const savedFormData = localStorage.getItem('${FORM_DATA_STORAGE_KEY}');
-                  if (savedFormData) {
-                    // Signal to the React component to restore data
-                    window.dispatchEvent(new CustomEvent('form:restore', { 
-                      detail: { time: Date.now() } 
-                    }));
-                  }
-                } catch (e) {
-                  console.error('Error in form protection script:', e);
-                }
-              }
-            }
-          })();
-        `}
-      </Script>
-      
       <div className="min-h-screen bg-[#1a1f2e] text-white">
         <Head>
           <title>Daily Update | Aditi Task Management</title>
