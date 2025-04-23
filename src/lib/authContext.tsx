@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { supabase } from './supabaseClient';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
+import { Session, User } from '@supabase/supabase-js';
 
 // User cache key for localStorage
 export const USER_CACHE_KEY = 'aditi_user_cache';
@@ -18,400 +19,258 @@ let GLOBAL_AUTH_INITIALIZED = false;
 
 export type UserRole = 'user' | 'manager' | 'admin';
 
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  teamId?: string;
-  teamName?: string;
-  lastChecked?: number;
-}
-
 interface AuthContextType {
   user: User | null;
-  isLoading: boolean;
+  session: Session | null;
+  loading: boolean;
+  userRole: string | null;
   signOut: () => Promise<void>;
-  checkUserRole: () => Promise<UserRole>;
-  refreshUser: () => Promise<void>;
-  forceSessionRefresh: () => Promise<boolean>;
+  forceSessionRefresh: () => Promise<void>;
+  refreshing: boolean;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  session: null,
+  loading: true,
+  userRole: null,
+  signOut: async () => {},
+  forceSessionRefresh: async () => {},
+  refreshing: false,
+});
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // Start with false to prevent initial loading flash
-  const [visibilityChanged, setVisibilityChanged] = useState(false);
-  const [sessionInitialized, setSessionInitialized] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSessionCheckTime, setLastSessionCheckTime] = useState<number>(0);
+  const [lastVisibilityState, setLastVisibilityState] = useState<string>('visible');
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [visibilityChangeCount, setVisibilityChangeCount] = useState(0);
+  
   const router = useRouter();
 
-  // Initialize user from localStorage if available
-  useEffect(() => {
-    // Track if this effect has run to prevent duplicate initialization
-    if (GLOBAL_AUTH_INITIALIZED) return;
-    GLOBAL_AUTH_INITIALIZED = true;
-
-    // This prevents Vercel from showing loading spinner too early
-    if (typeof window !== 'undefined') {
-      try {
-        const cachedUser = localStorage.getItem(USER_CACHE_KEY);
-        if (cachedUser) {
-          const parsedUser = JSON.parse(cachedUser);
-          setUser(parsedUser);
-          GLOBAL_SESSION_VALID = true;
-        }
-      } catch (error) {
-        console.error('Error loading cached user:', error);
-      }
-    }
-    
-    // Only check session if necessary (not checked recently)
-    const shouldCheckSession = shouldPerformSessionCheck();
-    if (shouldCheckSession) {
-      checkSessionQuietly();
-    } else {
-      setSessionInitialized(true);
-    }
-    
-    // Always force clear loading state after 3 seconds no matter what
-    const safetyTimer = setTimeout(() => {
-      if (isLoading) {
-        console.log('SAFETY: Force clearing loading state');
-        setIsLoading(false);
-      }
-      setSessionInitialized(true);
-    }, 3000);
-    
-    return () => clearTimeout(safetyTimer);
-  }, []);
-
-  // Handle visibility change events with enhanced error handling for Vercel
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      // Only trigger session check if document becomes visible AND was hidden before
-      if (document.visibilityState === 'visible' && visibilityChanged) {
-        try {
-          // We don't need an immediate check if the user is already authenticated
-          // Only check if the last check was more than the interval ago
-          if (shouldPerformSessionCheck()) {
-            checkSessionQuietly();
-          }
-          setVisibilityChanged(false);
-        } catch (error) {
-          console.error('Error in visibility change handler:', error);
-          // Ensure loading state is cleared even if there's an error
-          setIsLoading(false);
-          setVisibilityChanged(false);
-        }
-      } else if (document.visibilityState === 'hidden') {
-        setVisibilityChanged(true);
-      }
-    };
-
-    // Add event listener for visibility change
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Cleanup
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [visibilityChanged]);
-
-  // Check if session check should be performed based on time since last check
-  const shouldPerformSessionCheck = () => {
+  // Helper to set the last session check time
+  const updateLastSessionCheckTime = () => {
+    const now = Date.now();
+    setLastSessionCheckTime(now);
     try {
-      // Check the in-memory flag first
-      if (GLOBAL_SESSION_VALID && sessionInitialized) {
-        return false;
-      }
-
-      const lastCheckStr = localStorage.getItem(LAST_SESSION_CHECK_KEY);
-      if (!lastCheckStr) return true;
-      
-      const lastCheck = parseInt(lastCheckStr, 10);
-      const now = Date.now();
-      
-      // If last check was more than interval ago, we should check again
-      return (now - lastCheck) > SESSION_CHECK_INTERVAL;
+      localStorage.setItem(LAST_SESSION_CHECK_KEY, now.toString());
     } catch (error) {
-      console.error('Error checking last session time:', error);
-      return true;
+      console.error('Failed to save session check time:', error);
     }
   };
 
-  // Set up auth state listener
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        try {
-          await updateUserData(session.user);
-          GLOBAL_SESSION_VALID = true;
-        } catch (error) {
-          console.error('Error updating user data on sign in:', error);
-          setIsLoading(false);
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        localStorage.removeItem(USER_CACHE_KEY);
-        GLOBAL_SESSION_VALID = false;
-        
-        if (router.pathname !== '/') {
-          router.push('/');
-        }
-      } else if (event === 'TOKEN_REFRESHED') {
-        // Session token was refreshed, update the valid flag
-        GLOBAL_SESSION_VALID = true;
-        localStorage.setItem(LAST_SESSION_CHECK_KEY, Date.now().toString());
-      }
-    });
-    
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [router.pathname]);
-  
-  // Quiet session check without loading spinner - improved for Vercel
-  const checkSessionQuietly = async () => {
+  // Force refresh session token
+  const forceSessionRefresh = async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      
-      // Update last check timestamp
-      localStorage.setItem(LAST_SESSION_CHECK_KEY, Date.now().toString());
-      setSessionInitialized(true);
-      
-      if (error) {
-        console.error('Session check error:', error);
-        GLOBAL_SESSION_VALID = false;
-        setUser(null);
-        localStorage.removeItem(USER_CACHE_KEY);
-        return;
-      }
-      
-      if (session && session.user) {
-        updateUserData(session.user, false);
-        GLOBAL_SESSION_VALID = true;
-      } else if (!session && user) {
-        // Only clear user if we have one set
-        GLOBAL_SESSION_VALID = false;
-        setUser(null);
-        localStorage.removeItem(USER_CACHE_KEY);
-      }
-    } catch (error) {
-      console.error('Error checking session:', error);
-      setSessionInitialized(true);
-    }
-  };
-
-  // Update user data from Supabase user
-  const updateUserData = async (authUser: any, showLoading = true) => {
-    if (showLoading) {
-      setIsLoading(true);
-    }
-    
-    try {
-      if (!authUser?.email) {
-        setUser(null);
-        return;
-      }
-      
-      // Get user role
-      let role: UserRole = 'user';
-      
-      try {
-        // Check if admin
-        const { data: adminData } = await supabase
-          .from('aditi_admins')
-          .select('*')
-          .eq('email', authUser.email)
-          .single();
-        
-        if (adminData) {
-          role = 'admin';
-        } else {
-          // Check if manager
-          const { data: managerData } = await supabase
-            .from('aditi_teams')
-            .select('*')
-            .eq('manager_email', authUser.email);
-          
-          if (managerData && managerData.length > 0) {
-            role = 'manager';
-          }
-        }
-      } catch (error) {
-        console.error('Error checking user role:', error);
-      }
-      
-      // Get team info
-      let teamId = undefined;
-      let teamName = undefined;
-      
-      try {
-        const { data: userData } = await supabase
-          .from('aditi_team_members')
-          .select('*, aditi_teams(*)')
-          .eq('employee_email', authUser.email)
-          .single();
-        
-        if (userData) {
-          teamId = userData.team_id;
-          teamName = userData.aditi_teams?.team_name;
-        }
-      } catch (error) {
-        console.error('Error getting user team info:', error);
-      }
-      
-      // Create user object
-      const updatedUser = {
-        id: authUser.id,
-        email: authUser.email,
-        name: authUser.user_metadata?.name || authUser.email.split('@')[0] || 'User',
-        role,
-        teamId,
-        teamName,
-        lastChecked: Date.now()
-      };
-      
-      // Update state and cache
-      setUser(updatedUser);
-      localStorage.setItem(USER_CACHE_KEY, JSON.stringify(updatedUser));
-      
-    } catch (error) {
-      console.error('Error updating user data:', error);
-      setUser(null);
-    } finally {
-      if (showLoading) {
-        setIsLoading(false);
-      }
-    }
-  };
-
-  const refreshUser = async () => {
-    try {
-      setIsLoading(true);
-      
-      const { data: { user: authUser }, error } = await supabase.auth.getUser();
-      
-      if (error) {
-        console.error('Error getting user:', error);
-        setUser(null);
-        GLOBAL_SESSION_VALID = false;
-        return;
-      }
-      
-      if (authUser) {
-        await updateUserData(authUser);
-        GLOBAL_SESSION_VALID = true;
-      } else {
-        setUser(null);
-        GLOBAL_SESSION_VALID = false;
-      }
-    } catch (error) {
-      console.error('Error refreshing user:', error);
-      setUser(null);
-    } finally {
-      setIsLoading(false);
-      
-      // Safety timeout to ensure loading state is cleared
-      setTimeout(() => {
-        if (isLoading) {
-          console.log('Safety timeout clearing loading state in refreshUser');
-          setIsLoading(false);
-        }
-      }, 1000);
-    }
-  };
-
-  // Force refresh the session token - useful for handling 406 errors
-  const forceSessionRefresh = async (): Promise<boolean> => {
-    try {
-      setIsLoading(true);
-      
-      // Try to refresh the session
+      setRefreshing(true);
       const { data, error } = await supabase.auth.refreshSession();
-      
-      if (error || !data.session) {
-        console.error('Failed to refresh session:', error);
-        // If refresh fails, sign out
-        await signOut();
-        return false;
+      if (error) throw error;
+      if (data?.session) {
+        setSession(data.session);
+        if (data.session.user) {
+          setUser(data.session.user);
+        }
+        updateLastSessionCheckTime();
       }
-      
-      // Update user data with the refreshed session
-      await updateUserData(data.session.user);
-      
-      // Update our tracking variables
-      GLOBAL_SESSION_VALID = true;
-      localStorage.setItem(LAST_SESSION_CHECK_KEY, Date.now().toString());
-      
-      return true;
     } catch (error) {
-      console.error('Error in force session refresh:', error);
-      return false;
+      console.error('Error refreshing session:', error);
+      toast.error('Failed to refresh your session. Please login again.');
     } finally {
-      setIsLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const checkUserRole = async (): Promise<UserRole> => {
+  // Function to determine if we should perform a session check
+  const shouldPerformSessionCheck = () => {
+    // On initial load, always check
+    if (isInitialLoad) return true;
+    
+    // Don't check if we checked recently
+    const now = Date.now();
+    let lastCheck = lastSessionCheckTime;
+    
+    // Try to get from localStorage for cross-tab consistency
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      
-      if (!authUser?.email) return 'user';
-      
-      // Check if admin
-      const { data: adminData } = await supabase
-        .from('aditi_admins')
-        .select('*')
-        .eq('email', authUser.email)
-        .single();
-      
-      if (adminData) return 'admin';
-      
-      // Check if manager
-      const { data: managerData } = await supabase
-        .from('aditi_teams')
-        .select('*')
-        .eq('manager_email', authUser.email);
-      
-      if (managerData && managerData.length > 0) return 'manager';
-      
-      return 'user';
+      const storedLastCheck = localStorage.getItem(LAST_SESSION_CHECK_KEY);
+      if (storedLastCheck) {
+        lastCheck = parseInt(storedLastCheck, 10);
+      }
     } catch (error) {
-      console.error('Error checking user role:', error);
-      return 'user';
+      console.error('Failed to read last session check time:', error);
+    }
+    
+    // If we haven't checked in SESSION_CHECK_INTERVAL, check again
+    return now - lastCheck > SESSION_CHECK_INTERVAL;
+  };
+
+  // Function to handle visibility change
+  const handleVisibilityChange = async () => {
+    // Skip if this is the first load
+    if (isInitialLoad) return;
+    
+    // Track visibility changes
+    setVisibilityChangeCount(prev => prev + 1);
+    
+    // Only do work when becoming visible
+    if (document.visibilityState === 'visible' && lastVisibilityState === 'hidden') {
+      // Mark this state change
+      setLastVisibilityState('visible');
+      
+      // Should we check the session?
+      if (shouldPerformSessionCheck()) {
+        try {
+          // Don't interrupt user flow, but quietly refresh in background
+          const { data } = await supabase.auth.getSession();
+          
+          // Only update if we got valid data and it differs from current session
+          if (data?.session && JSON.stringify(data.session) !== JSON.stringify(session)) {
+            setSession(data.session);
+            if (data.session.user) {
+              setUser(data.session.user);
+            }
+          }
+          
+          // Update the last check time
+          updateLastSessionCheckTime();
+        } catch (error) {
+          console.error('Error checking session on visibility change:', error);
+        }
+      }
+    } else if (document.visibilityState === 'hidden') {
+      // Mark that we're now hidden
+      setLastVisibilityState('hidden');
     }
   };
 
+  // Function to sign out
   const signOut = async () => {
     try {
-      setIsLoading(true);
-      await supabase.auth.signOut();
-      setUser(null);
-      localStorage.removeItem(USER_CACHE_KEY);
-      GLOBAL_SESSION_VALID = false;
-      toast.success('Successfully signed out');
+      setLoading(true);
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
       router.push('/');
     } catch (error) {
       console.error('Error signing out:', error);
-      toast.error('Failed to sign out');
+      toast.error('Error signing out');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
+  // Initialize auth state and set up listeners
+  useEffect(() => {
+    let mounted = true;
+    
+    const initializeAuth = async () => {
+      try {
+        // Get the session
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (mounted) {
+          if (data?.session) {
+            setSession(data.session);
+            setUser(data.session.user);
+            
+            // Get user role
+            if (data.session?.user?.id) {
+              const { data: userData, error: userError } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', data.session.user.id)
+                .single();
+
+              if (userError) throw userError;
+              setUserRole(userData?.role || 'user');
+            }
+            
+            setSessionRestored(true);
+          } else {
+            // No session
+            setUser(null);
+            setSession(null);
+            setUserRole(null);
+          }
+          
+          updateLastSessionCheckTime();
+          setLoading(false);
+          setIsInitialLoad(false);
+        }
+      } catch (error) {
+        console.error('Error getting session:', error);
+        if (mounted) {
+          setLoading(false);
+          setIsInitialLoad(false);
+        }
+      }
+    };
+
+    // Initialize auth on mount
+    initializeAuth();
+
+    // Listen for auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, currentSession) => {
+        if (mounted) {
+          setSession(currentSession);
+          setUser(currentSession?.user ?? null);
+
+          if (currentSession?.user) {
+            try {
+              const { data, error } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', currentSession.user.id)
+                .single();
+
+              if (error) throw error;
+              setUserRole(data?.role || 'user');
+            } catch (error) {
+              console.error('Error getting user role:', error);
+            }
+          } else {
+            setUserRole(null);
+          }
+
+          setLoading(false);
+        }
+      }
+    );
+
+    // Setup visibility change listener
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      mounted = false;
+      authListener?.subscription?.unsubscribe();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
+  }, [router]);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, signOut, checkUserRole, refreshUser, forceSessionRefresh }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        loading,
+        userRole,
+        signOut,
+        forceSessionRefresh,
+        refreshing,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-} 
+export const useAuth = () => useContext(AuthContext); 
