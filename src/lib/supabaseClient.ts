@@ -68,6 +68,17 @@ supabase.auth.getSession().then(({ data, error }) => {
   }
 });
 
+// Enhanced User type to include additional properties used in components
+export interface EnhancedUser {
+  id: string;
+  email?: string;
+  name?: string;
+  role?: string;
+  teamId?: string;
+  teamName?: string;
+  lastChecked?: number;
+}
+
 // Type definitions for our tables
 export interface Team {
   id: string;
@@ -93,18 +104,16 @@ export interface TeamMember {
 
 export interface DailyUpdate {
   id: string;
-  created_at: string;
-  employee_email: string;
   employee_name: string;
+  employee_id: string;
+  employee_email: string;
   team_id: string;
   tasks_completed: string;
-  status: string;
-  blocker_type: string | null;
-  blocker_description: string | null;
-  expected_resolution_date: string | null;
-  additional_notes: string | null;
-  aditi_teams?: {
-    id: string;
-    team_name: string;
-  }
+  status: 'in-progress' | 'completed' | 'blocked';
+  additional_notes?: string;
+  blocker_type?: string;
+  blocker_description?: string;
+  expected_resolution_date?: string;
+  created_at: string;
+  aditi_teams?: Team;
 } 

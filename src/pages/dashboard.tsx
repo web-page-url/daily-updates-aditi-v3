@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
-import { supabase, DailyUpdate, TeamMember } from '../lib/supabaseClient';
+import { supabase, DailyUpdate, TeamMember, EnhancedUser } from '../lib/supabaseClient';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
@@ -16,9 +16,9 @@ interface DashboardUser {
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, signOut, loading } = useAuth();
+  const enhancedUser = user as unknown as EnhancedUser | null;
   
-  const [isLoading, setIsLoading] = useState(false);
   const [loadingFailed, setLoadingFailed] = useState(false);
   const [historicalData, setHistoricalData] = useState<DailyUpdate[]>([]);
   const [filteredData, setFilteredData] = useState<DailyUpdate[]>([]);
@@ -50,9 +50,8 @@ export default function Dashboard() {
   useEffect(() => {
     // Safety timeout to prevent infinite loading
     const safetyTimeout = setTimeout(() => {
-      if (isLoading) {
+      if (loading) {
         console.log('Dashboard safety timeout reached');
-        setIsLoading(false);
         setLoadingFailed(true);
       }
     }, 10000);
@@ -68,7 +67,9 @@ export default function Dashboard() {
     if (!user) return;
     
     try {
-      setIsLoading(true);
+      setIsRefreshing(true);
+      setLoadingFailed(false);
+      
       // Admin can see all teams
       if (user.role === 'admin') {
         const { data, error } = await supabase
@@ -107,19 +108,20 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Error fetching teams:', error);
-      toast.error('Failed to load teams');
-      setIsLoading(false);
       setLoadingFailed(true);
+      toast.error('Failed to load dashboard data. Please try again.');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
   const fetchData = async (teamFilter: string = '') => {
     try {
-      setIsLoading(true);
+      setIsRefreshing(true);
       
       // Set a hard timeout to prevent the loader from getting stuck forever
       const timeout = setTimeout(() => {
-        setIsLoading(false);
+        setLoadingFailed(true);
         console.log('Fetch data timeout reached, forcing loading state to false');
       }, 8000); // 8 seconds max loading time
       
@@ -148,7 +150,7 @@ export default function Dashboard() {
           setHistoricalData([]);
           setFilteredData([]);
           calculateStats([]);
-          setIsLoading(false);
+          setLoadingFailed(true);
           if (loadingTimeout) clearTimeout(loadingTimeout);
           return;
         }
@@ -248,7 +250,7 @@ export default function Dashboard() {
         setLoadingFailed(true);
       }
     } finally {
-      setIsLoading(false);
+      setIsRefreshing(false);
       if (loadingTimeout) clearTimeout(loadingTimeout);
     }
   };
@@ -407,7 +409,7 @@ export default function Dashboard() {
                   <span className="hidden md:inline">
                     {user?.role === 'admin' 
                       ? 'Admin Dashboard - Full Access' 
-                      : `Manager Dashboard - ${user?.name} (${user?.email})`}
+                      : `Manager Dashboard - ${enhancedUser?.name || user?.email?.split('@')[0] || 'Manager'} (${user?.email})`}
                   </span>
                 </p>
               </div>
@@ -426,8 +428,7 @@ export default function Dashboard() {
                 </div>
                 <div className="flex items-center">
                   <span className="mr-4 text-sm text-gray-300">
-                    {/* {user ? `Welcome, ${user.user_metadata.name}` : 'Loading...'} */}
-                    {user ? `Welcome, }` : 'Loading...'}
+                    {user ? `Welcome, ${enhancedUser?.name || user.email?.split('@')[0] || 'User'}` : 'Loading...'}
                   </span>
                   <button
                     onClick={() => router.push('/')}
@@ -441,7 +442,7 @@ export default function Dashboard() {
           </nav>
           
           <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            {isLoading ? (
+            {loading ? (
               <div className="flex justify-center items-center h-64">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
               </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
-import { supabase, DailyUpdate, Team } from '../lib/supabaseClient';
+import { supabase, DailyUpdate, Team, EnhancedUser } from '../lib/supabaseClient';
 import { useAuth } from '../lib/authContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useRouter } from 'next/router';
@@ -26,6 +26,9 @@ interface Blocker {
 export default function DailyUpdateFormPage() {
   const router = useRouter();
   const { user } = useAuth();
+  // Cast user to EnhancedUser to access additional properties
+  const enhancedUser = user as unknown as EnhancedUser | null;
+  
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -126,7 +129,7 @@ export default function DailyUpdateFormPage() {
             // If user is different, use user info but not saved form data
             setFormData(prev => ({
               ...prev,
-              employee_name: user.name || '',
+              employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
               email_address: user.email || '',
             }));
           }
@@ -134,7 +137,7 @@ export default function DailyUpdateFormPage() {
           // If no saved data, use user info
           setFormData(prev => ({
             ...prev,
-            employee_name: user.name || '',
+            employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
             email_address: user.email || '',
           }));
         }
@@ -145,8 +148,8 @@ export default function DailyUpdateFormPage() {
           if (parsedFormData.email_address === user.email) {
             setSelectedTeam(savedSelectedTeam);
           }
-        } else if (user.teamId) {
-          setSelectedTeam(user.teamId);
+        } else if (enhancedUser?.teamId) {
+          setSelectedTeam(enhancedUser.teamId);
         }
         
         // Set blockers if saved
@@ -169,12 +172,12 @@ export default function DailyUpdateFormPage() {
         // Fallback to default user data
         setFormData(prev => ({
           ...prev,
-          employee_name: user.name || '',
+          employee_name: enhancedUser?.name || user.email?.split('@')[0] || '',
           email_address: user.email || '',
         }));
         
-        if (user.teamId) {
-          setSelectedTeam(user.teamId);
+        if (enhancedUser?.teamId) {
+          setSelectedTeam(enhancedUser.teamId);
         }
       }
     }
@@ -492,7 +495,7 @@ export default function DailyUpdateFormPage() {
         setShowAnimation(false);
         // Clear form
         setFormData({
-          employee_name: user?.name || '',
+          employee_name: enhancedUser?.name || user?.email?.split('@')[0] || '',
           employee_id: formData.employee_id, // Keep the employee ID
           email_address: user?.email || '',
           tasks_completed: '',
