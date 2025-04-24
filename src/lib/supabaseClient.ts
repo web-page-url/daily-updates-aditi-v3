@@ -118,7 +118,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,        // Keep session persisted in storage
     autoRefreshToken: false,     // Disable auto refresh since we're handling it ourselves
-    detectSessionInUrl: false,   // Don't auto-detect from URL (prevents refresh issues)
+    detectSessionInUrl: true,    // Enable session detection in URL (necessary for magic link auth)
     storage: createCustomStorage()
   },
   global: {
@@ -180,6 +180,35 @@ if (typeof window !== 'undefined') {
     }
   });
 }
+
+// Debugging function to check token status
+export const checkAuthToken = () => {
+  if (typeof window === 'undefined') return null;
+  
+  try {
+    const tokenStr = localStorage.getItem('supabase.auth.token');
+    if (!tokenStr) {
+      console.log('Auth token not found in localStorage');
+      return null;
+    }
+    
+    const token = JSON.parse(tokenStr);
+    const now = Date.now();
+    
+    console.log('Auth token status:', {
+      hasToken: !!token,
+      expiresAt: token?.expires_at ? new Date(token.expires_at).toISOString() : 'unknown',
+      expiresIn: token?.expires_in ? `${Math.floor(token.expires_in / 86400)} days` : 'unknown',
+      isExpired: token?.expires_at ? token.expires_at < now : 'unknown',
+      timeRemaining: token?.expires_at ? `${Math.floor((token.expires_at - now) / 86400000)} days` : 'unknown'
+    });
+    
+    return token;
+  } catch (error) {
+    console.error('Error checking auth token:', error);
+    return null;
+  }
+};
 
 export default supabase;
 
