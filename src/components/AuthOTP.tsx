@@ -1,81 +1,11 @@
-import { useState, useEffect } from 'react';
-import { supabase, checkAuthToken } from '../lib/supabaseClient';
+import { useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { toast } from 'react-hot-toast';
-import { useRouter } from 'next/router';
-import { USER_CACHE_KEY } from '../lib/authContext';
 
 export default function AuthOTP() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
-  const router = useRouter();
-
-  // Check for authentication hash in URL on component mount
-  useEffect(() => {
-    const { hash } = window.location;
-    
-    // If we have a hash in the URL, it means we're being redirected back after magic link click
-    if (hash && hash.includes('access_token')) {
-      // Clear the hash from the URL to prevent issues with multiple token processing
-      if (window.history.replaceState) {
-        window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
-      }
-      
-      console.log('Magic link authentication detected in URL');
-      setIsLoading(true);
-      
-      // Process the auth callback
-      (async () => {
-        try {
-          // Get the current session
-          const { data, error } = await supabase.auth.getSession();
-          
-          if (error) {
-            console.error('Error getting session after magic link:', error);
-            toast.error('Failed to authenticate. Please try again.');
-            return;
-          }
-          
-          if (data?.session) {
-            console.log('Authentication successful, session established');
-            
-            // Manually extend token validity to prevent issues
-            try {
-              const tokenStr = localStorage.getItem('supabase.auth.token');
-              if (tokenStr) {
-                const token = JSON.parse(tokenStr);
-                if (token) {
-                  // Update token expiry to 100 years
-                  const TOKEN_VALIDITY_PERIOD = 3153600000000;
-                  token.expires_at = Date.now() + TOKEN_VALIDITY_PERIOD;
-                  token.expires_in = TOKEN_VALIDITY_PERIOD / 1000;
-                  localStorage.setItem('supabase.auth.token', JSON.stringify(token));
-                  console.log('Extended token lifetime after magic link auth');
-                }
-              }
-              
-              // Also check the token status for debugging
-              checkAuthToken();
-              
-              // Set last session check timestamp
-              localStorage.setItem('aditi_last_session_check', Date.now().toString());
-              
-              // Force redirect to dashboard after successful auth
-              setTimeout(() => {
-                router.push('/dashboard');
-              }, 1500);
-              
-              toast.success('Login successful! Redirecting...');
-            } catch (err) {
-              console.error('Error extending token lifetime after magic link auth:', err);
-            }
-          }
-        } finally {
-          setIsLoading(false);
-        }
-      })();
-    }
-  }, [router]);
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +22,6 @@ export default function AuthOTP() {
         email,
         options: {
           emailRedirectTo: window.location.origin,
-          shouldCreateUser: true,
         },
       });
       

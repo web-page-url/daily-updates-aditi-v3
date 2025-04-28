@@ -5,44 +5,10 @@ import Head from 'next/head';
 import { AuthProvider } from "@/lib/authContext";
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { initializeFormPersistence } from '@/lib/formPersistenceStore';
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const [isAdminRoute, setIsAdminRoute] = useState(false);
-  const [pageTabRefreshPrevented, setPageTabRefreshPrevented] = useState(false);
-
-  // Initialize form persistence store
-  useEffect(() => {
-    // Only run in browser
-    if (typeof window !== 'undefined') {
-      initializeFormPersistence();
-      
-      // Add global handler to detect and prevent unwanted page refreshes
-      const preventUnwantedRefresh = (event: BeforeUnloadEvent) => {
-        // Check if this page contains form content that should be preserved
-        const formContent = document.querySelector('form');
-        const hasUnsavedContent = formContent && localStorage.getItem('aditi_daily_update_form_data');
-        
-        if (hasUnsavedContent && !sessionStorage.getItem('intentional_navigation')) {
-          // For special pages with form content, ensure we maintain state
-          if (
-            router.pathname.includes('daily-update-form') || 
-            router.pathname.includes('edit-profile')
-          ) {
-            // This prevents the default reload behavior on tab switch
-            setPageTabRefreshPrevented(true);
-          }
-        }
-      };
-      
-      window.addEventListener('pageshow', preventUnwantedRefresh);
-      
-      return () => {
-        window.removeEventListener('pageshow', preventUnwantedRefresh);
-      };
-    }
-  }, [router.pathname]);
 
   // Route-specific handling
   useEffect(() => {
@@ -96,7 +62,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="theme-color" content="#1a1f2e" />
       </Head>
-      <Component {...pageProps} key={pageTabRefreshPrevented ? undefined : router.asPath} />
+      <Component {...pageProps} />
       <Toaster position="top-right" toastOptions={{
         style: {
           background: '#1a1f2e',

@@ -8,14 +8,9 @@ const nextConfig = {
   // Set rendering mode for pages
   experimental: {
     serverComponentsExternalPackages: [],
-    scrollRestoration: true,
   },
   // Disable static page optimization globally
   swcMinify: true,
-  // Add runtime configuration to improve tab behavior
-  publicRuntimeConfig: {
-    preserveFormState: true
-  }
 }
 
 module.exports = nextConfig;

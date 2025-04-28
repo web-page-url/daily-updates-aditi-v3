@@ -1,18 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { supabase, DailyUpdate, Team } from '../lib/supabaseClient';
 import { useAuth } from '../lib/authContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
-import debounce from 'lodash/debounce';
-
-// Constants for localStorage keys
-const FORM_DATA_STORAGE_KEY = 'aditi_daily_update_form_data';
-const BLOCKERS_STORAGE_KEY = 'aditi_daily_update_blockers';
-const SELECTED_TEAM_STORAGE_KEY = 'aditi_daily_update_selected_team';
-const CURRENT_BLOCKER_STORAGE_KEY = 'aditi_daily_update_current_blocker';
-const TAB_STATE_PERSISTENCE_KEY = 'aditi_daily_update_tab_state';
 
 interface Blocker {
   id: string;
@@ -22,8 +14,8 @@ interface Blocker {
 }
 
 export default function DailyUpdateFormPage() {
-  const router = useRouter();
   const { user } = useAuth();
+  const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -46,132 +38,17 @@ export default function DailyUpdateFormPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  
-  // Refs to track tab visibility state
-  const wasHidden = useRef(false);
-  const tabFocusCount = useRef(0);
-  const initialLoadComplete = useRef(false);
 
-  // Debounced save function to prevent excessive localStorage writes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const debouncedSave = useCallback(
-    debounce((key: string, data: any) => {
-      try {
-        setAutoSaveStatus('saving');
-        localStorage.setItem(key, JSON.stringify(data));
-        setAutoSaveStatus('saved');
-        
-        // Reset status after 2 seconds
-        setTimeout(() => {
-          if (autoSaveStatus === 'saved') {
-            setAutoSaveStatus('idle');
-          }
-        }, 2000);
-      } catch (error) {
-        console.error(`Error saving ${key} to localStorage:`, error);
-        setAutoSaveStatus('error');
-      }
-    }, 300),
-    [autoSaveStatus]
-  );
-
-  // Function to save all form data
-  const saveAllFormData = useCallback(() => {
-    if (!formData.email_address || isSubmitting) return;
-
-    try {
-      setAutoSaveStatus('saving');
-      localStorage.setItem(FORM_DATA_STORAGE_KEY, JSON.stringify(formData));
-      localStorage.setItem(BLOCKERS_STORAGE_KEY, JSON.stringify(blockers));
-      if (selectedTeam) {
-        localStorage.setItem(SELECTED_TEAM_STORAGE_KEY, selectedTeam);
-      }
-      localStorage.setItem(CURRENT_BLOCKER_STORAGE_KEY, JSON.stringify(currentBlocker));
-      setAutoSaveStatus('saved');
-      
-      // Reset status after 2 seconds
-      setTimeout(() => {
-        if (autoSaveStatus === 'saved') {
-          setAutoSaveStatus('idle');
-        }
-      }, 2000);
-    } catch (error) {
-      console.error('Error saving form data to localStorage:', error);
-      setAutoSaveStatus('error');
-    }
-  }, [formData, blockers, selectedTeam, currentBlocker, isSubmitting, autoSaveStatus]);
-
-  // Load form data from localStorage when component mounts or user changes
   useEffect(() => {
     if (user) {
-      try {
-        // Try to load saved form data
-        const savedFormData = localStorage.getItem(FORM_DATA_STORAGE_KEY);
-        const savedBlockers = localStorage.getItem(BLOCKERS_STORAGE_KEY);
-        const savedSelectedTeam = localStorage.getItem(SELECTED_TEAM_STORAGE_KEY);
-        const savedCurrentBlocker = localStorage.getItem(CURRENT_BLOCKER_STORAGE_KEY);
-        
-        // If we have saved form data, use it
-        if (savedFormData) {
-          const parsedFormData = JSON.parse(savedFormData);
-          // Only use saved data if it matches the current user
-          if (parsedFormData.email_address === user.email) {
-            setFormData(parsedFormData);
-          } else {
-            // If user is different, use user info but not saved form data
-            setFormData(prev => ({
-              ...prev,
-              employee_name: user.name || '',
-              email_address: user.email || '',
-            }));
-          }
-        } else {
-          // If no saved data, use user info
-          setFormData(prev => ({
-            ...prev,
-            employee_name: user.name || '',
-            email_address: user.email || '',
-          }));
-        }
-        
-        // Set team id if saved or from user profile
-        if (savedSelectedTeam && savedFormData) {
-          const parsedFormData = JSON.parse(savedFormData);
-          if (parsedFormData.email_address === user.email) {
-            setSelectedTeam(savedSelectedTeam);
-          }
-        } else if (user.teamId) {
-          setSelectedTeam(user.teamId);
-        }
-        
-        // Set blockers if saved
-        if (savedBlockers && savedFormData) {
-          const parsedFormData = JSON.parse(savedFormData);
-          if (parsedFormData.email_address === user.email) {
-            setBlockers(JSON.parse(savedBlockers));
-          }
-        }
-
-        // Set current blocker if saved
-        if (savedCurrentBlocker && savedFormData) {
-          const parsedFormData = JSON.parse(savedFormData);
-          if (parsedFormData.email_address === user.email) {
-            setCurrentBlocker(JSON.parse(savedCurrentBlocker));
-          }
-        }
-      } catch (error) {
-        console.error('Error loading form data from localStorage:', error);
-        // Fallback to default user data
-        setFormData(prev => ({
-          ...prev,
-          employee_name: user.name || '',
-          email_address: user.email || '',
-        }));
-        
-        if (user.teamId) {
-          setSelectedTeam(user.teamId);
-        }
+      setFormData(prev => ({
+        ...prev,
+        employee_name: user.name || '',
+        email_address: user.email || '',
+      }));
+      
+      if (user.teamId) {
+        setSelectedTeam(user.teamId);
       }
     }
     
@@ -186,135 +63,6 @@ export default function DailyUpdateFormPage() {
     };
     setCurrentDate(date.toLocaleDateString('en-US', options));
   }, [user]);
-
-  // Save form data to localStorage immediately after each change
-  useEffect(() => {
-    if (formData.email_address && !isSubmitting) {
-      debouncedSave(FORM_DATA_STORAGE_KEY, formData);
-    }
-  }, [formData, isSubmitting, debouncedSave]);
-
-  // Save blockers to localStorage whenever they change
-  useEffect(() => {
-    if (formData.email_address && !isSubmitting) {
-      debouncedSave(BLOCKERS_STORAGE_KEY, blockers);
-    }
-  }, [blockers, formData.email_address, isSubmitting, debouncedSave]);
-
-  // Save current blocker to localStorage whenever it changes
-  useEffect(() => {
-    if (formData.email_address && !isSubmitting && showBlockerForm) {
-      debouncedSave(CURRENT_BLOCKER_STORAGE_KEY, currentBlocker);
-    }
-  }, [currentBlocker, formData.email_address, isSubmitting, showBlockerForm, debouncedSave]);
-
-  // Save selected team to localStorage whenever it changes
-  useEffect(() => {
-    if (selectedTeam && formData.email_address && !isSubmitting) {
-      debouncedSave(SELECTED_TEAM_STORAGE_KEY, selectedTeam);
-    }
-  }, [selectedTeam, formData.email_address, isSubmitting, debouncedSave]);
-
-  // Prevent unwanted refreshes when tab becomes visible again
-  useEffect(() => {
-    // Track router events to prevent unnecessary refreshes
-    const handleRouteChangeStart = () => {
-      // Store a flag to indicate intentional navigation
-      sessionStorage.setItem('intentional_navigation', '1');
-    };
-
-    // Track initial load to avoid refresh on first render
-    if (!initialLoadComplete.current) {
-      initialLoadComplete.current = true;
-      
-      // Store tab state on initial load
-      try {
-        const timestamp = Date.now().toString();
-        localStorage.setItem(TAB_STATE_PERSISTENCE_KEY, timestamp);
-      } catch (error) {
-        console.error('Error storing tab state:', error);
-      }
-    }
-
-    router.events.on('routeChangeStart', handleRouteChangeStart);
-    
-    return () => {
-      router.events.off('routeChangeStart', handleRouteChangeStart);
-    };
-  }, [router.events]);
-
-  // Handle visibility change to ensure data is saved when tab is switched
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        // Tab is being hidden, save the form data
-        if (formData.email_address) {
-          saveAllFormData();
-        }
-        wasHidden.current = true;
-      } else if (document.visibilityState === 'visible') {
-        // Tab is becoming visible again
-        tabFocusCount.current += 1;
-        
-        // Reset autosave status display
-        if (autoSaveStatus === 'saving' || autoSaveStatus === 'saved') {
-          setAutoSaveStatus('idle');
-        }
-        
-        // If this wasn't triggered by a page navigation and the tab was previously hidden
-        if (wasHidden.current && !sessionStorage.getItem('intentional_navigation')) {
-          // Check if this is a legitimate tab switch rather than a refresh
-          try {
-            const lastTabState = localStorage.getItem(TAB_STATE_PERSISTENCE_KEY);
-            
-            if (lastTabState) {
-              // Update the timestamp to indicate we handled this visibility change
-              localStorage.setItem(TAB_STATE_PERSISTENCE_KEY, Date.now().toString());
-              
-              // Only prevent default behavior if we've already loaded the page once
-              if (tabFocusCount.current > 1) {
-                // Stop any events that might cause a refresh
-                const event = window.event;
-                if (event) {
-                  // @ts-ignore - We know this is an event with preventDefault
-                  if (typeof event.preventDefault === 'function') {
-                    // @ts-ignore
-                    event.preventDefault();
-                  }
-                  // @ts-ignore
-                  if (typeof event.stopPropagation === 'function') {
-                    // @ts-ignore
-                    event.stopPropagation();
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Error handling tab visibility change:', error);
-          }
-        }
-        
-        // Clear intentional navigation flag if it exists
-        sessionStorage.removeItem('intentional_navigation');
-        wasHidden.current = false;
-      }
-    };
-    
-    // Save before page unload to catch navigation events
-    const handleBeforeUnload = () => {
-      if (formData.email_address) {
-        saveAllFormData();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [formData, blockers, selectedTeam, currentBlocker, saveAllFormData, autoSaveStatus]);
 
   const fetchUserTeams = async () => {
     try {
@@ -479,11 +227,6 @@ export default function DailyUpdateFormPage() {
       toast.success('Daily update submitted successfully!');
       setShowAnimation(true);
       
-      // Clear localStorage after successful submission
-      localStorage.removeItem(FORM_DATA_STORAGE_KEY);
-      localStorage.removeItem(BLOCKERS_STORAGE_KEY);
-      localStorage.removeItem(SELECTED_TEAM_STORAGE_KEY);
-      
       setTimeout(() => {
         setShowAnimation(false);
         // Clear form
@@ -516,12 +259,13 @@ export default function DailyUpdateFormPage() {
       [name]: value
     }));
     
-    // Clear validation error for this field when value changes
+    // Clear errors when field is updated
     if (formErrors[name]) {
-      setFormErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
+      setFormErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
     }
   };
 
@@ -532,17 +276,16 @@ export default function DailyUpdateFormPage() {
       [name]: value
     }));
   };
-  
-  // Also update team selection to clear errors
+
   const handleTeamChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedTeam(e.target.value);
     
-    // Clear team validation error when value changes
     if (formErrors.team) {
-      setFormErrors(prev => ({
-        ...prev,
-        team: ''
-      }));
+      setFormErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors.team;
+        return newErrors;
+      });
     }
   };
 
@@ -559,35 +302,7 @@ export default function DailyUpdateFormPage() {
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="bg-[#1e2538] shadow-xl rounded-lg overflow-hidden">
               <div className="bg-gradient-to-r from-purple-600 to-indigo-700 text-white py-6 px-6 md:px-8">
-                <div className="flex justify-between items-center">
-                  <h1 className="text-xl md:text-2xl font-bold mb-2">Daily Update Form</h1>
-                  {/* Auto Save Indicator */}
-                  {autoSaveStatus !== 'idle' && (
-                    <div className="flex items-center text-sm">
-                      {autoSaveStatus === 'saving' && (
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      )}
-                      {autoSaveStatus === 'saved' && (
-                        <svg className="mr-2 h-4 w-4 text-green-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                      {autoSaveStatus === 'error' && (
-                        <svg className="mr-2 h-4 w-4 text-red-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      )}
-                      <span>
-                        {autoSaveStatus === 'saving' && 'Auto-saving...'}
-                        {autoSaveStatus === 'saved' && 'Changes saved'}
-                        {autoSaveStatus === 'error' && 'Error saving'}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <h1 className="text-xl md:text-2xl font-bold mb-2">Daily Update Form</h1>
                 <p className="text-purple-100">{currentDate}</p>
               </div>
 

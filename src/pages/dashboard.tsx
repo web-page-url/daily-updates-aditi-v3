@@ -430,10 +430,10 @@ export default function Dashboard() {
                     {user ? `Welcome, }` : 'Loading...'}
                   </span>
                   <button
-                    onClick={() => router.push('/')}
+                    onClick={() => router.push('/team-management')}
                     className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm transition-colors duration-300"
                   >
-                    Daily Update Form
+                    Team Management
                   </button>
                 </div>
               </div>

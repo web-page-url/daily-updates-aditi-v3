@@ -3,24 +3,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import AuthOTP from '../components/AuthOTP';
 import { useAuth } from '../lib/authContext';
-import { checkAuthToken } from '../lib/supabaseClient';
 
 export default function Home() {
-  const { user, isLoading, forceSessionRefresh } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const [showFallbackUI, setShowFallbackUI] = useState(false);
-  const [manuallyRetried, setManuallyRetried] = useState(false);
 
   useEffect(() => {
-    // Log auth status for debugging
-    console.log('Auth status:', { 
-      user: user ? `${user.email} (${user.role})` : 'not signed in', 
-      isLoading 
-    });
-    
-    // Check the token status from localStorage
-    checkAuthToken();
-    
     // Force UI to show auth screen if loading takes too long (3 seconds)
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
@@ -28,29 +17,9 @@ export default function Home() {
         setShowFallbackUI(true);
       }
     }, 3000);
-    
-    // If loading is taking too long, try to force refresh the session
-    const refreshTimeout = setTimeout(() => {
-      if (isLoading && !manuallyRetried) {
-        console.log('Auth taking too long, forcing session refresh');
-        forceSessionRefresh();
-        setManuallyRetried(true);
-      }
-    }, 2000);
 
-    // If URL has hash, it means we're returning from auth
-    // This is a fallback check in case the component-level check fails
-    if (window.location.hash && window.location.hash.includes('access_token')) {
-      console.log('Auth hash detected in URL at page level');
-    }
-    
     // If user is already authenticated, redirect based on role
     if (user && !isLoading) {
-      // Ensure the token is properly extended first
-      checkAuthToken();
-      
-      console.log('User authenticated, redirecting to dashboard');
-      
       switch (user.role) {
         case 'admin':
         case 'manager':
@@ -59,17 +28,11 @@ export default function Home() {
         case 'user':
           router.push('/user-dashboard');
           break;
-        default:
-          // If role is undefined, default to user dashboard
-          router.push('/user-dashboard');
       }
     }
 
-    return () => {
-      clearTimeout(loadingTimeout);
-      clearTimeout(refreshTimeout);
-    };
-  }, [user, isLoading, router, forceSessionRefresh, manuallyRetried]);
+    return () => clearTimeout(loadingTimeout);
+  }, [user, isLoading, router]);
 
   // Show a brief loading spinner, but only for a short time
   if (isLoading && !showFallbackUI) {
@@ -78,12 +41,6 @@ export default function Home() {
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-white text-sm">Loading...</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="mt-4 text-sm text-purple-400 hover:text-purple-300"
-          >
-            Taking too long? Click to refresh
-          </button>
         </div>
       </div>
     );

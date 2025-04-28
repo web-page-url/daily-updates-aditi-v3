@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { supabase, DailyUpdate } from '../lib/supabaseClient';
 import { useAuth } from '../lib/authContext';
@@ -7,7 +7,7 @@ import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
 
 export default function UserDashboard() {
-  const { user, signOut, forceSessionRefresh } = useAuth();
+  const { user, signOut } = useAuth();
   const router = useRouter();
   const [userUpdates, setUserUpdates] = useState<DailyUpdate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -19,47 +19,21 @@ export default function UserDashboard() {
   const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const mountedRef = useRef(true);
-  const initialLoad = useRef(false);
 
-  // Track component mount state
   useEffect(() => {
-    mountedRef.current = true;
-    
-    return () => {
-      mountedRef.current = false;
-      if (loadingTimeout) clearTimeout(loadingTimeout);
-    };
-  }, []);
-
-  // Only fetch data when user is available and component is mounted
-  useEffect(() => {
-    if (user && !initialLoad.current) {
-      initialLoad.current = true;
+    if (user) {
       fetchUserUpdates();
     }
-  }, [user]);
-  
-  // Handle date range changes
-  useEffect(() => {
-    if (initialLoad.current && user) {
-      fetchUserUpdates();
-    }
-  }, [dateRange]);
+  }, [user, dateRange]);
 
   const fetchUserUpdates = async () => {
-    if (!user || !mountedRef.current) return;
-    
     try {
       setIsLoading(true);
       
       // Set a hard timeout to prevent the loader from getting stuck forever
       const timeout = setTimeout(() => {
-        if (mountedRef.current) {
-          setIsLoading(false);
-          console.log('User updates fetch timeout reached, forcing loading state to false');
-        }
+        setIsLoading(false);
+        console.log('User updates fetch timeout reached, forcing loading state to false');
       }, 15000); // 15 seconds max loading time
       
       if (loadingTimeout) clearTimeout(loadingTimeout);
@@ -78,16 +52,15 @@ export default function UserDashboard() {
         if (error.code === '406' || error.message?.includes('406') || (error as any).status === 406) {
           console.error('Session token issue detected (406 error). Attempting to refresh session...');
           
-          // Use the new force session refresh method
-          const refreshSuccess = await forceSessionRefresh();
+          // Try to refresh the session
+          const { data: sessionData, error: refreshError } = await supabase.auth.refreshSession();
           
-          if (!refreshSuccess) {
-            console.error('Failed to refresh session after 406 error');
-            throw new Error('Session refresh failed');
+          if (refreshError || !sessionData.session) {
+            console.error('Failed to refresh session after 406 error:', refreshError);
+            // Force user to sign out and go to login page
+            await signOut();
+            return;
           }
-          
-          // Only retry the fetch if the component is still mounted
-          if (!mountedRef.current) return;
           
           // Retry the fetch after successful token refresh
           console.log('Session refreshed, retrying data fetch...');
@@ -103,46 +76,25 @@ export default function UserDashboard() {
             throw retryError;
           }
           
-          if (mountedRef.current) {
-            setUserUpdates(retryData || []);
-            setLastFetched(new Date());
-            setDataLoaded(true);
-          }
+          setUserUpdates(retryData || []);
+          setLastFetched(new Date());
+          setDataLoaded(true);
           return;
         }
         
         throw error;
       }
       
-      if (mountedRef.current) {
-        setUserUpdates(data || []);
-        setLastFetched(new Date());
-        setDataLoaded(true);
-        setRetryCount(0); // Reset retry count on successful fetch
-      }
+      setUserUpdates(data || []);
+      setLastFetched(new Date());
+      setDataLoaded(true);
     } catch (error) {
       console.error('Error fetching user updates:', error);
-      
-      // If we've already tried refreshing the session, show an error toast
-      if (retryCount >= 2) {
-        toast.error('Failed to load your updates. Please try refreshing the page.');
-      } else {
-        // Try again with session refresh
-        setRetryCount(prev => prev + 1);
-        await forceSessionRefresh();
-        if (mountedRef.current) {
-          fetchUserUpdates();
-        }
-      }
-      
+      toast.error('Failed to load your updates');
       // Even in case of error, provide empty data to prevent UI from being stuck
-      if (mountedRef.current) {
-        setUserUpdates([]);
-      }
+      setUserUpdates([]);
     } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
       if (loadingTimeout) clearTimeout(loadingTimeout);
     }
   };
@@ -160,13 +112,6 @@ export default function UserDashboard() {
       ...prev,
       [name]: value
     }));
-  };
-
-  const refreshData = () => {
-    if (!isLoading) {
-      fetchUserUpdates();
-      toast.success('Refreshing data...');
-    }
   };
 
   const formatDate = (dateString: string) => {
@@ -242,29 +187,7 @@ export default function UserDashboard() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Date range filter */}
           <div className="bg-[#1e2538] rounded-lg shadow-lg p-6 mb-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-medium text-white mb-4">Filter by Date</h2>
-              
-              <button
-                onClick={refreshData}
-                disabled={isLoading}
-                className={`flex items-center px-3 py-1.5 text-sm border border-gray-600 rounded ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#262d40]'
-                }`}
-              >
-                {isLoading ? (
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                )}
-                {isLoading ? 'Loading...' : 'Refresh'}
-              </button>
-            </div>
+            <h2 className="text-lg font-medium text-white mb-4">Filter by Date</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="start" className="block text-sm font-medium text-gray-200 mb-1">Start Date</label>
