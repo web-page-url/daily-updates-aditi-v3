@@ -154,6 +154,7 @@ export default function Dashboard() {
         const savedFilteredData = localStorage.getItem(`dashboard_filteredData_${user.email}`);
         const savedStats = localStorage.getItem(`dashboard_stats_${user.email}`);
         const savedLastRefreshed = localStorage.getItem(`dashboard_lastRefreshed_${user.email}`);
+        const savedTeams = localStorage.getItem(`dashboard_teams_${user.email}`);
         
         // Set data loaded flag to true if we have saved data
         let hasData = false;
@@ -162,10 +163,39 @@ export default function Dashboard() {
           const parsedData = JSON.parse(savedHistoricalData);
           setHistoricalData(parsedData);
           hasData = true;
+          
+          // If we have historical data but no filtered data, apply filters immediately
+          if (!savedFilteredData && parsedData.length > 0) {
+            // Create a filtered copy based on current filters
+            let filtered = [...parsedData];
+            
+            // Apply date range filter
+            filtered = filtered.filter(update => {
+              const updateDate = new Date(update.created_at).toISOString().split('T')[0];
+              return updateDate >= dateRange.start && updateDate <= dateRange.end;
+            });
+            
+            // Apply team filter if we have one
+            const currentSelectedTeam = localStorage.getItem(`dashboard_selectedTeam_${user.email}`);
+            if (currentSelectedTeam) {
+              filtered = filtered.filter(update => update.team_id === currentSelectedTeam);
+            }
+            
+            // Set the filtered data
+            setFilteredData(filtered);
+            calculateStats(filtered);
+          }
         }
         
         if (savedFilteredData) {
-          setFilteredData(JSON.parse(savedFilteredData));
+          const parsedFilteredData = JSON.parse(savedFilteredData);
+          setFilteredData(parsedFilteredData);
+          
+          // If we didn't have historical data but have filtered data, set historical as well
+          if (!savedHistoricalData && parsedFilteredData.length > 0) {
+            setHistoricalData(parsedFilteredData);
+            hasData = true;
+          }
         }
         
         if (savedStats) {
@@ -176,14 +206,58 @@ export default function Dashboard() {
           setLastRefreshed(new Date(savedLastRefreshed));
         }
         
+        // Restore teams data if available
+        if (savedTeams) {
+          const parsedTeams = JSON.parse(savedTeams);
+          setTeams(parsedTeams);
+        }
+        
         if (hasData) {
           setDataLoaded(true);
+          
+          // After loading data, also make sure to apply filters
+          // This will ensure filteredData is correctly set based on current filters
+          setTimeout(() => {
+            applyFilters();
+          }, 100);
         }
       } catch (error) {
         console.error('Error loading saved dashboard data:', error);
       }
     }
   }, [user]);
+
+  // Add a timeout to ensure applyFilters runs after all state is loaded
+  useEffect(() => {
+    if (dataLoaded && historicalData.length > 0) {
+      // Short timeout to ensure all state has been updated
+      const timer = setTimeout(() => {
+        console.log('Running applyFilters after data loaded - Historical data length:', historicalData.length);
+        applyFilters();
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [dataLoaded, historicalData, selectedTeam, dateRange, activeTab]);
+
+  // For debugging - log filtered data changes
+  useEffect(() => {
+    console.log('Filtered data changed - new length:', filteredData.length);
+  }, [filteredData]);
+
+  // Save filtered data to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email && filteredData.length > 0) {
+      try {
+        localStorage.setItem(`dashboard_filteredData_${user.email}`, JSON.stringify(filteredData));
+        
+        // Also save stats when filtered data changes
+        localStorage.setItem(`dashboard_stats_${user.email}`, JSON.stringify(stats));
+      } catch (error) {
+        console.error('Error saving filtered data to localStorage:', error);
+      }
+    }
+  }, [filteredData, stats, user]);
 
   useEffect(() => {
     // Safety timeout to prevent infinite loading
@@ -205,11 +279,57 @@ export default function Dashboard() {
     return () => clearTimeout(safetyTimeout);
   }, [user, dataLoaded, teams.length]);
 
+  // Add a new effect to handle visibility changes (tab switching)
+  useEffect(() => {
+    // Function to handle visibility change
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        console.log('Tab became visible, checking if data refresh needed');
+        
+        // Check if we have data and if it's stale (older than 5 minutes)
+        const shouldRefresh = lastRefreshed 
+          ? (new Date().getTime() - lastRefreshed.getTime() > 5 * 60 * 1000) 
+          : true;
+        
+        if (shouldRefresh) {
+          console.log('Data is stale, refreshing in background');
+          // Refresh data in background (without loading indicator)
+          if (teams.length > 0) {
+            fetchDataSilently(selectedTeam);
+          } else {
+            fetchTeamsBasedOnRole();
+          }
+        }
+      }
+    };
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Clean up the event listener
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user, lastRefreshed, selectedTeam, teams]);
+
+  // Also save teams data to localStorage
+  useEffect(() => {
+    if (user?.email && teams.length > 0) {
+      try {
+        localStorage.setItem(`dashboard_teams_${user.email}`, JSON.stringify(teams));
+      } catch (error) {
+        console.error('Error saving teams data to localStorage:', error);
+      }
+    }
+  }, [teams, user]);
+
   const fetchTeamsBasedOnRole = async () => {
     if (!user) return;
     
     try {
       setIsLoading(true);
+      console.log('Fetching teams based on role:', user.role);
+      
       // Admin can see all teams
       if (user.role === 'admin') {
         const { data, error } = await supabase
@@ -218,6 +338,7 @@ export default function Dashboard() {
           .order('team_name', { ascending: true });
           
         if (error) throw error;
+        console.log('Admin teams loaded:', data?.length || 0);
         setTeams(data || []);
         await fetchData(''); // Begin data fetch immediately after teams are loaded
       } 
@@ -230,6 +351,7 @@ export default function Dashboard() {
           .order('team_name', { ascending: true });
           
         if (error) throw error;
+        console.log('Manager teams loaded:', data?.length || 0);
         setTeams(data || []);
         
         // If manager has exactly one team, auto-select it
@@ -254,8 +376,14 @@ export default function Dashboard() {
     }
   };
 
+  useEffect(() => {
+    applyFilters();
+  }, [activeTab, selectedTeam, dateRange, historicalData]);
+
+  // Add better debugging to fetchData
   const fetchData = async (teamFilter: string = '') => {
     try {
+      console.log('fetchData called with teamFilter:', teamFilter);
       setIsLoading(true);
       
       // Set a hard timeout to prevent the loader from getting stuck forever
@@ -303,6 +431,8 @@ export default function Dashboard() {
         // Handle error cases
         throw error;
       }
+      
+      console.log('Data fetched successfully, total records:', data?.length || 0);
       
       // Update state with fetched data
       setHistoricalData(data || []);
@@ -422,6 +552,61 @@ export default function Dashboard() {
     }
   };
 
+  // Add a silent data fetching function (no loading state, for background refresh)
+  const fetchDataSilently = async (teamFilter: string = '') => {
+    try {
+      let query = supabase
+        .from('aditi_daily_updates')
+        .select('*, aditi_teams(*)');
+
+      // Admin with no team filter sees all data
+      if (user?.role === 'admin' && !teamFilter) {
+        // No additional filters needed - admin sees all
+      } 
+      // Admin with team filter or manager sees specific team data
+      else if (teamFilter) {
+        query = query.eq('team_id', teamFilter);
+      }
+      // Manager with no specific team selected sees all their teams' data
+      else if (user?.role === 'manager') {
+        const managerTeamIds = teams.map(team => team.id);
+        if (managerTeamIds.length > 0) {
+          query = query.in('team_id', managerTeamIds);
+        } else {
+          return; // No teams to fetch for
+        }
+      }
+
+      query = query.order('created_at', { ascending: false });
+      
+      const { data, error } = await query;
+
+      if (error) throw error;
+      
+      // Update state with fetched data
+      setHistoricalData(data || []);
+      setFilteredData(data || []);
+      calculateStats(data || []);
+      
+      const now = new Date();
+      setLastRefreshed(now);
+      setDataLoaded(true);
+      
+      // Update localStorage with latest data
+      if (user?.email) {
+        try {
+          localStorage.setItem(`dashboard_historicalData_${user.email}`, JSON.stringify(data || []));
+          localStorage.setItem(`dashboard_lastRefreshed_${user.email}`, now.toISOString());
+        } catch (error) {
+          console.error('Error saving fetched data to localStorage:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error silently fetching data:', error);
+      // Don't show error messages to user when doing background refresh
+    }
+  };
+
   const calculateStats = (data: DailyUpdate[]) => {
     const stats = {
       totalUpdates: data.length,
@@ -434,6 +619,14 @@ export default function Dashboard() {
   };
 
   const applyFilters = () => {
+    console.log('Applying filters to historical data:', historicalData.length);
+    console.log('Current filters - dateRange:', dateRange, 'selectedTeam:', selectedTeam, 'activeTab:', activeTab);
+    
+    if (!historicalData.length) {
+      console.log('No historical data to filter');
+      return;
+    }
+    
     let filtered = [...historicalData];
 
     // Apply date range filter
@@ -461,6 +654,7 @@ export default function Dashboard() {
         break;
     }
 
+    console.log('Filtered data count after applying filters:', filtered.length);
     setFilteredData(filtered);
     calculateStats(filtered);
   };
@@ -470,10 +664,6 @@ export default function Dashboard() {
       fetchData(selectedTeam);
     }
   }, [selectedTeam, user]);
-
-  useEffect(() => {
-    applyFilters();
-  }, [activeTab, selectedTeam, dateRange, historicalData]);
 
   const toggleRowExpansion = (id: string) => {
     setExpandedRows(prev => ({
