@@ -47,6 +47,144 @@ export default function Dashboard() {
   const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
+  // Load saved dashboard state from localStorage
+  useEffect(() => {
+    if (user) {
+      try {
+        // Load saved filters and state
+        const savedActiveTab = localStorage.getItem(`dashboard_activeTab_${user.email}`);
+        const savedSelectedTeam = localStorage.getItem(`dashboard_selectedTeam_${user.email}`);
+        const savedDateRange = localStorage.getItem(`dashboard_dateRange_${user.email}`);
+        const savedExpandedRows = localStorage.getItem(`dashboard_expandedRows_${user.email}`);
+        const savedCurrentPage = localStorage.getItem(`dashboard_currentPage_${user.email}`);
+
+        // Apply saved values if they exist
+        if (savedActiveTab) {
+          setActiveTab(savedActiveTab as 'all' | 'recent' | 'blockers');
+        }
+        
+        if (savedSelectedTeam) {
+          setSelectedTeam(savedSelectedTeam);
+        }
+        
+        if (savedDateRange) {
+          setDateRange(JSON.parse(savedDateRange));
+        }
+        
+        if (savedExpandedRows) {
+          setExpandedRows(JSON.parse(savedExpandedRows));
+        }
+        
+        if (savedCurrentPage) {
+          setCurrentPage(parseInt(savedCurrentPage));
+        }
+      } catch (error) {
+        console.error('Error loading dashboard state from localStorage:', error);
+      }
+    }
+  }, [user]);
+
+  // Save active tab to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem(`dashboard_activeTab_${user.email}`, activeTab);
+    }
+  }, [activeTab, user]);
+
+  // Save selected team to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem(`dashboard_selectedTeam_${user.email}`, selectedTeam);
+    }
+  }, [selectedTeam, user]);
+
+  // Save date range to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem(`dashboard_dateRange_${user.email}`, JSON.stringify(dateRange));
+    }
+  }, [dateRange, user]);
+
+  // Save expanded rows to localStorage whenever they change
+  useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem(`dashboard_expandedRows_${user.email}`, JSON.stringify(expandedRows));
+    }
+  }, [expandedRows, user]);
+
+  // Save current page to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem(`dashboard_currentPage_${user.email}`, currentPage.toString());
+    }
+  }, [currentPage, user]);
+
+  // Save fetched data to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.email && historicalData.length > 0) {
+      try {
+        localStorage.setItem(`dashboard_historicalData_${user.email}`, JSON.stringify(historicalData));
+        
+        // Also save filtered data so we don't need to recompute it
+        localStorage.setItem(`dashboard_filteredData_${user.email}`, JSON.stringify(filteredData));
+        
+        // Save stats
+        localStorage.setItem(`dashboard_stats_${user.email}`, JSON.stringify(stats));
+        
+        // Save last refreshed time
+        if (lastRefreshed) {
+          localStorage.setItem(`dashboard_lastRefreshed_${user.email}`, lastRefreshed.toISOString());
+        }
+      } catch (error) {
+        console.error('Error saving dashboard data to localStorage:', error);
+        // If we encounter an error (likely because the data is too large), clear previous data
+        localStorage.removeItem(`dashboard_historicalData_${user.email}`);
+        localStorage.removeItem(`dashboard_filteredData_${user.email}`);
+        localStorage.removeItem(`dashboard_stats_${user.email}`);
+      }
+    }
+  }, [historicalData, filteredData, stats, lastRefreshed, user]);
+
+  // Update the existing load function to also load historicalData, filteredData, stats and lastRefreshed
+  useEffect(() => {
+    if (user) {
+      try {
+        // Load all saved data (already loading filters in previous useEffect)
+        const savedHistoricalData = localStorage.getItem(`dashboard_historicalData_${user.email}`);
+        const savedFilteredData = localStorage.getItem(`dashboard_filteredData_${user.email}`);
+        const savedStats = localStorage.getItem(`dashboard_stats_${user.email}`);
+        const savedLastRefreshed = localStorage.getItem(`dashboard_lastRefreshed_${user.email}`);
+        
+        // Set data loaded flag to true if we have saved data
+        let hasData = false;
+        
+        if (savedHistoricalData) {
+          const parsedData = JSON.parse(savedHistoricalData);
+          setHistoricalData(parsedData);
+          hasData = true;
+        }
+        
+        if (savedFilteredData) {
+          setFilteredData(JSON.parse(savedFilteredData));
+        }
+        
+        if (savedStats) {
+          setStats(JSON.parse(savedStats));
+        }
+        
+        if (savedLastRefreshed) {
+          setLastRefreshed(new Date(savedLastRefreshed));
+        }
+        
+        if (hasData) {
+          setDataLoaded(true);
+        }
+      } catch (error) {
+        console.error('Error loading saved dashboard data:', error);
+      }
+    }
+  }, [user]);
+
   useEffect(() => {
     // Safety timeout to prevent infinite loading
     const safetyTimeout = setTimeout(() => {
@@ -58,11 +196,14 @@ export default function Dashboard() {
     }, 10000);
     
     if (user) {
-      fetchTeamsBasedOnRole();
+      // Only fetch teams data if we don't already have it
+      if (!dataLoaded || teams.length === 0) {
+        fetchTeamsBasedOnRole();
+      }
     }
     
     return () => clearTimeout(safetyTimeout);
-  }, [user]);
+  }, [user, dataLoaded, teams.length]);
 
   const fetchTeamsBasedOnRole = async () => {
     if (!user) return;
@@ -163,11 +304,26 @@ export default function Dashboard() {
         throw error;
       }
       
+      // Update state with fetched data
       setHistoricalData(data || []);
       setFilteredData(data || []);
       calculateStats(data || []);
-      setLastRefreshed(new Date());
+      
+      const now = new Date();
+      setLastRefreshed(now);
       setDataLoaded(true);
+      
+      // Update localStorage with latest data
+      if (user?.email) {
+        try {
+          localStorage.setItem(`dashboard_historicalData_${user.email}`, JSON.stringify(data || []));
+          localStorage.setItem(`dashboard_lastRefreshed_${user.email}`, now.toISOString());
+          
+          // Don't store filtered data yet as applyFilters will run and update it
+        } catch (error) {
+          console.error('Error saving fetched data to localStorage:', error);
+        }
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
       
@@ -227,11 +383,24 @@ export default function Dashboard() {
             throw retryError;
           }
           
+          // Update state with retry data
           setHistoricalData(retryData || []);
           setFilteredData(retryData || []);
           calculateStats(retryData || []);
-          setLastRefreshed(new Date());
+          
+          const now = new Date();
+          setLastRefreshed(now);
           setDataLoaded(true);
+          
+          // Update localStorage with latest data
+          if (user?.email) {
+            try {
+              localStorage.setItem(`dashboard_historicalData_${user.email}`, JSON.stringify(retryData || []));
+              localStorage.setItem(`dashboard_lastRefreshed_${user.email}`, now.toISOString());
+            } catch (error) {
+              console.error('Error saving retry data to localStorage:', error);
+            }
+          }
         } catch (retryError) {
           console.error('Error during retry:', retryError);
           toast.error('Failed to load updates');
@@ -359,7 +528,14 @@ export default function Dashboard() {
     setIsRefreshing(true);
     try {
       await fetchData(selectedTeam);
-      setLastRefreshed(new Date());
+      const now = new Date();
+      setLastRefreshed(now);
+      
+      // Update localStorage with the refresh time
+      if (user?.email) {
+        localStorage.setItem(`dashboard_lastRefreshed_${user.email}`, now.toISOString());
+      }
+      
       toast.success('Data refreshed successfully');
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -423,11 +599,18 @@ export default function Dashboard() {
                   <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
                     Aditi Manager Dashboard
                   </h1>
+                  {dataLoaded && !isLoading && (
+                    <span className="ml-3 text-xs text-gray-400 flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      State preserved
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center">
                   <span className="mr-4 text-sm text-gray-300">
-                    {/* {user ? `Welcome, ${user.user_metadata.name}` : 'Loading...'} */}
-                    {user ? `Welcome, }` : 'Loading...'}
+                    {user ? `Welcome, ${user.name}` : 'Loading...'}
                   </span>
                   <button
                     onClick={() => router.push('/team-management')}
@@ -460,10 +643,25 @@ export default function Dashboard() {
                     Retry
                   </button>
                   <button 
-                    onClick={() => router.reload()}
+                    onClick={() => {
+                      // Clear localStorage data for this dashboard
+                      if (user?.email) {
+                        localStorage.removeItem(`dashboard_historicalData_${user.email}`);
+                        localStorage.removeItem(`dashboard_filteredData_${user.email}`);
+                        localStorage.removeItem(`dashboard_stats_${user.email}`);
+                        localStorage.removeItem(`dashboard_activeTab_${user.email}`);
+                        localStorage.removeItem(`dashboard_selectedTeam_${user.email}`);
+                        localStorage.removeItem(`dashboard_dateRange_${user.email}`);
+                        localStorage.removeItem(`dashboard_expandedRows_${user.email}`);
+                        localStorage.removeItem(`dashboard_currentPage_${user.email}`);
+                        localStorage.removeItem(`dashboard_lastRefreshed_${user.email}`);
+                      }
+                      // Reload the page
+                      router.reload();
+                    }}
                     className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
                   >
-                    Reload Page
+                    Clear Cache & Reload
                   </button>
                 </div>
               </div>
@@ -560,11 +758,38 @@ export default function Dashboard() {
                       >
                         Export CSV
                       </button>
+                      <button
+                        onClick={() => {
+                          // Clear localStorage data for this dashboard
+                          if (user?.email) {
+                            localStorage.removeItem(`dashboard_historicalData_${user.email}`);
+                            localStorage.removeItem(`dashboard_filteredData_${user.email}`);
+                            localStorage.removeItem(`dashboard_stats_${user.email}`);
+                            localStorage.removeItem(`dashboard_activeTab_${user.email}`);
+                            localStorage.removeItem(`dashboard_selectedTeam_${user.email}`);
+                            localStorage.removeItem(`dashboard_dateRange_${user.email}`);
+                            localStorage.removeItem(`dashboard_expandedRows_${user.email}`);
+                            localStorage.removeItem(`dashboard_currentPage_${user.email}`);
+                            localStorage.removeItem(`dashboard_lastRefreshed_${user.email}`);
+                            toast.success('Cache cleared, refreshing data...');
+                          }
+                          // Fetch fresh data
+                          setTimeout(() => {
+                            fetchTeamsBasedOnRole();
+                          }, 300);
+                        }}
+                        className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-300"
+                      >
+                        Clear Cache
+                      </button>
                     </div>
                   </div>
                   {lastRefreshed && (
                     <div className="mt-3 text-xs text-gray-400 text-right">
-                      Last updated: {lastRefreshed.toLocaleString()}
+                      Last updated: {lastRefreshed.toLocaleString()} 
+                      {dataLoaded && !isLoading && (
+                        <span className="ml-2 text-green-400">• Data preserved across tabs</span>
+                      )}
                     </div>
                   )}
                 </div>
