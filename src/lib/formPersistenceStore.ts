@@ -149,18 +149,16 @@ export const initializeFormPersistence = (): void => {
   // Register visibility change handler at the application level
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
+      // We specifically DO NOT take any action when the tab becomes visible again
+      // This prevents unwanted refreshes when users switch between tabs
+      
+      // We'll only clear the intentional navigation flag if it exists
       if (document.visibilityState === 'visible') {
-        // Check for session storage flag that indicates intentional navigation
-        const isIntentionalNavigation = !!sessionStorage.getItem('intentional_navigation');
-        
-        if (!isIntentionalNavigation) {
-          // Clean up expired data when tab becomes visible
-          cleanupExpiredFormData();
-        }
-        
-        // Clear the flag
         sessionStorage.removeItem('intentional_navigation');
       }
+      
+      // Deliberately not calling cleanupExpiredFormData() on visibility change
+      // This prevents triggering operations that might cause UI refresh
     });
   }
 }; 

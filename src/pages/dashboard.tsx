@@ -283,23 +283,27 @@ export default function Dashboard() {
   useEffect(() => {
     // Function to handle visibility change
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
-        console.log('Tab became visible, checking if data refresh needed');
+      // Set a class on the body to indicate recent tab visibility change
+      if (document.visibilityState === 'visible') {
+        console.log('Tab became visible, preventing unnecessary refreshes');
         
-        // Check if we have data and if it's stale (older than 5 minutes)
-        const shouldRefresh = lastRefreshed 
-          ? (new Date().getTime() - lastRefreshed.getTime() > 5 * 60 * 1000) 
-          : true;
+        // Check if the global prevention mechanism is active
+        const preventRefresh = typeof sessionStorage !== 'undefined' && 
+          (sessionStorage.getItem('returning_from_tab_switch') || 
+           sessionStorage.getItem('prevent_auto_refresh'));
         
-        if (shouldRefresh) {
-          console.log('Data is stale, refreshing in background');
-          // Refresh data in background (without loading indicator)
-          if (teams.length > 0) {
-            fetchDataSilently(selectedTeam);
-          } else {
-            fetchTeamsBasedOnRole();
-          }
+        if (preventRefresh) {
+          console.log('Global tab switch prevention active');
+          return; // Defer to the global handler in _app.tsx
         }
+        
+        // Set a flag directly on the document
+        document.body.classList.add('dashboard-tab-active');
+        
+        // Remove the class after a while
+        setTimeout(() => {
+          document.body.classList.remove('dashboard-tab-active');
+        }, 2000);
       }
     };
     
@@ -310,7 +314,7 @@ export default function Dashboard() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user, lastRefreshed, selectedTeam, teams]);
+  }, []);
 
   // Also save teams data to localStorage
   useEffect(() => {
@@ -554,7 +558,14 @@ export default function Dashboard() {
 
   // Add a silent data fetching function (no loading state, for background refresh)
   const fetchDataSilently = async (teamFilter: string = '') => {
+    // Check if we're returning from a tab switch
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('returning_from_tab_switch')) {
+      console.log('Skipping silent data refresh due to returning from tab switch');
+      return; // Skip refresh if returning from tab switch
+    }
+    
     try {
+      console.log('Silent data refresh starting, teamFilter:', teamFilter);
       let query = supabase
         .from('aditi_daily_updates')
         .select('*, aditi_teams(*)');
@@ -715,6 +726,12 @@ export default function Dashboard() {
   };
 
   const refreshData = async () => {
+    // Check if we're returning from a tab switch
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('returning_from_tab_switch')) {
+      console.log('Skipping manual data refresh due to returning from tab switch');
+      return; // Skip refresh if returning from tab switch
+    }
+    
     setIsRefreshing(true);
     try {
       await fetchData(selectedTeam);

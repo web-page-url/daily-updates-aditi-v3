@@ -21,6 +21,27 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     fetch: async (url, options = {}) => {
+      // Check if we just returned from a tab switch
+      const isReturningFromTabSwitch = typeof window !== 'undefined' && 
+        (sessionStorage?.getItem('returning_from_tab_switch') || 
+         sessionStorage?.getItem('prevent_auto_refresh'));
+      
+      // Skip unnecessary fetches when returning from tab switch
+      if (isReturningFromTabSwitch && typeof url === 'string' && url.includes('/auth/')) {
+        console.log('Skipping auth fetch during tab switch', url);
+        // Return a fake successful response to prevent errors
+        const mockResponse = new Response(JSON.stringify({ 
+          data: { session: null },
+          error: null
+        }), {
+          status: 200,
+          headers: new Headers({
+            'Content-Type': 'application/json'
+          })
+        });
+        return mockResponse;
+      }
+      
       // Add custom error handling for fetch operations
       try {
         const response = await fetch(url, options);
